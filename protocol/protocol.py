@@ -75,6 +75,10 @@ class Server(Socket):
         self.candidates = candidates
         self.votes = Counter(candidates)
 
+        # Reset candidates
+        for i in candidates:
+            self.votes[i] = 0
+
         # Debug server
         print(bcolors.BOLD + 'Voting Server connected at ' + str({'address': address, 'port': port}) + bcolors.ENDC)
         print(bcolors.OKGREEN + 'Sucessfuly registered PUBLIC_KEY in serverPublicKey.txt file:\n' + bcolors.HEADER + bcolors.BOLD + key + bcolors.ENDC)

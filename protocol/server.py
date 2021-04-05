@@ -22,3 +22,7 @@ if __name__ == '__main__':
         server.printVotes()
         server.socket.close()
         sys.exit()
+
+    server.printVotes()
+    server.socket.close()
+    sys.exit()
