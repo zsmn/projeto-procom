@@ -2,9 +2,12 @@ import os
 import socket
 import ast
 import random
+from collections import Counter
+from base64 import b64encode, b64decode
 from Crypto import Random
 from Crypto.Cipher import AES
 from Crypto.Cipher import PKCS1_OAEP
+from Crypto.Util.Padding import pad, unpad
 from Crypto.PublicKey import RSA
 
 class bcolors:
@@ -39,22 +42,38 @@ class Socket:
         self.privateKey = RSA.generate(1024, Random.new().read)
         self.publicKey = self.privateKey.publickey()
 
-    def encryptMessage(self, message, key):
-        encryptor = PKCS1_OAEP.new(key)
-        return encryptor.encrypt(message)
+    def encryptMessage(self, message, key, encryptType = 'assymetric'):
+        if(encryptType == 'assymetric'):
+            encryptor = PKCS1_OAEP.new(key)
+            return encryptor.encrypt(message)
+        else:
+            encryptor = AES.new(key, AES.MODE_CBC)
+            cipher = b64encode(encryptor.encrypt(pad(message, AES.block_size))).decode('utf-8')
+            iv = b64encode(encryptor.iv).decode('utf-8')
+            return {'cipher': cipher, 'iv': iv}
 
-    def decryptMessage(self, message, key):
-        decryptor = PKCS1_OAEP.new(key)
-        return decryptor.decrypt(ast.literal_eval(str(message)))
+    def decryptMessage(self, message, key, encryptType = 'assymetric', iv = ''):
+        if(encryptType == 'assymetric'):
+            decryptor = PKCS1_OAEP.new(key)
+            return decryptor.decrypt(ast.literal_eval(str(message)))
+        else:
+            message = b64decode(message)
+            iv = b64decode(iv)
+            decryptor = AES.new(key, AES.MODE_CBC, iv)
+            return unpad(decryptor.decrypt(message), AES.block_size)
 
 class Server(Socket):
-    def __init__(self, address, port):
+    def __init__(self, address, port, candidates):
         Socket.__init__(self, address, port)
 
         # Save server public key in file
         file = open('serverPublicKey.txt', 'w')
         key = self.publicKey.exportKey("PEM").decode('utf-8')
         file.write(key)
+
+        # Set candidates
+        self.candidates = candidates
+        self.votes = Counter(candidates)
 
         # Debug server
         print(bcolors.BOLD + 'Voting Server connected at ' + str({'address': address, 'port': port}) + bcolors.ENDC)
@@ -66,6 +85,19 @@ class Server(Socket):
 
     def sendMessage(self, clientSocket, message):
         clientSocket.sendall(message)
+
+    def checkValidCandidate(self, candidate):
+        return (self.candidates.__contains__(candidate))
+    
+    def addVote(self, candidate):
+        self.votes[candidate] += 1
+
+    def printVotes(self):
+        print("=======================")
+        print(bcolors.BOLD + "Session results" + bcolors.ENDC)
+        print("=======================")
+        for k,v in self.votes.items():
+            print(bcolors.BOLD + k + " = " + str(v) + bcolors.ENDC)
 
 class Client(Socket):
     def __init__(self, address, port):
@@ -139,14 +171,40 @@ class Protocol:
 
         print(bcolors.OKCYAN + '[VOTE SESSION] Starting vote session with', clientAddress, bcolors.ENDC)
 
-        # TODO: for loop with vote session
-        ###
-        print(bcolors.OKBLUE + '[VOTE SESSION] Awaiting vote from', clientAddress, bcolors.ENDC)
-        print(bcolors.FAIL + '[VOTE SESSION] Received an invalid vote from', clientAddress, ', re-running loop.' ,bcolors.ENDC)
-        ###
+        while True:
+            # Await for client vote
+            print(bcolors.OKBLUE + '[VOTE SESSION] Awaiting vote from', clientAddress, bcolors.ENDC)
+            vote = clientSocket.recv(1024)
 
-        print(bcolors.OKGREEN + '[VOTE SESSION] Received an valid vote from', clientAddress, 'and vote computed successfully, finishing connection.', bcolors.ENDC)
+            # Take voted candidate and IV
+            voteMap = eval(vote)
+            vote = server.decryptMessage(voteMap['cipher'], self.symmetricKey, encryptType='symmetric', iv=b64encode(server.decryptMessage(voteMap['iv'], server.privateKey))).decode('utf-8')
 
+            # If is valid candidate
+            if(server.checkValidCandidate(vote)):
+                # Add vote
+                server.addVote(vote)
+                
+                # Send ack
+                serverResponse = server.encryptMessage(b'ack', self.symmetricKey, encryptType='symmetric')
+                serverResponse['iv'] = server.encryptMessage(b64decode(serverResponse['iv']), clientPublicKey)
+                strResponse = str(serverResponse)
+
+                server.sendMessage(clientSocket, bytes(strResponse, 'utf-8'))
+
+                # Finish vote session
+                print(bcolors.OKGREEN + '[VOTE SESSION] Received an valid vote from', clientAddress, 'and vote computed successfully, finishing connection.', bcolors.ENDC)
+                break
+            else:
+                # Send nack
+                serverResponse = server.encryptMessage(b'nack', self.symmetricKey, encryptType='symmetric')
+                serverResponse['iv'] = server.encryptMessage(b64decode(serverResponse['iv']), clientPublicKey)
+                strResponse = str(serverResponse)
+
+                server.sendMessage(clientSocket, bytes(strResponse, 'utf-8'))
+
+                print(bcolors.FAIL + '[VOTE SESSION] Received an invalid vote from', clientAddress, ', re-running loop.' ,bcolors.ENDC)
+        
         # End connection
         clientSocket.close()
 
@@ -204,14 +262,32 @@ class Protocol:
 
         print(bcolors.OKCYAN + '[VOTE SESSION] Starting vote session' + bcolors.ENDC)
 
-        # TODO: for loop with vote session
-        ###
-        print(bcolors.OKBLUE + '[VOTE SESSION] Sent vote to server' + bcolors.ENDC)
-        print(bcolors.FAIL + '[VOTE SESSION] Sent vote was not valid, send another one' + bcolors.ENDC)
-        ###
+        while True:
+            # Take client vote
+            votedPerson = input("Insert your vote: ")
+            votedPerson = bytearray(votedPerson, "utf-8")
+            
+            # Encrypt vote with symmetric key and encrypt IV with server public key
+            vote = client.encryptMessage(votedPerson, self.symmetricKey, encryptType='symmetric')
+            vote['iv'] = client.encryptMessage(b64decode(vote['iv']), serverPublicKey)
+            vote = str(vote)
 
-        print(bcolors.OKGREEN + '[VOTE SESSION] Sent vote was valid, finished vote session and closing connection with vote server.' + bcolors.ENDC)
+            # Send vote to server
+            client.sendMessage(bytes(vote, 'utf-8'))
+            print(bcolors.OKBLUE + '[VOTE SESSION] Sent vote to server' + bcolors.ENDC)
+            
+            # Await server response
+            serverResponse = client.socket.recv(1024)
 
+            # Take response map and decrypt all elements
+            serverResponseMap = eval(serverResponse)
+            serverResponse = client.decryptMessage(serverResponseMap['cipher'], self.symmetricKey, encryptType='symmetric', iv=b64encode(client.decryptMessage(serverResponseMap['iv'], client.privateKey))).decode('utf-8')
+            if(serverResponse == 'ack'):
+                print(bcolors.OKGREEN + '[VOTE SESSION] Sent vote was valid, finished vote session and closing connection with vote server.' + bcolors.ENDC)
+                break
+            else:
+                print(bcolors.FAIL + '[VOTE SESSION] Sent vote was not valid, send another one' + bcolors.ENDC)
+        
         # Close connection
         client.socket.close()
 
