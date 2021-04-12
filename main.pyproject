@@ -1,0 +1,3 @@
+{
+    "files": ["application/ui/resources.qrc","application/ui/ui.ui","protocol/protocol.py","application/ui/ui.py","application/server.py","application/client.py"]
+}
