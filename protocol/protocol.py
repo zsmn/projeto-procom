@@ -33,7 +33,7 @@ class Socket:
         # Assymetric keys
         self.publicKey = ""
         self.privateKey = ""
-        self.generateAssymetricKeys()
+        self.generateAsymmetricKeys()
 
         # Create socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -41,12 +41,12 @@ class Socket:
     def connect(self):
         pass
 
-    def generateAssymetricKeys(self):
+    def generateAsymmetricKeys(self):
         self.privateKey = RSA.generate(1024, Random.new().read)
         self.publicKey = self.privateKey.publickey()
 
-    def encryptMessage(self, message, key, encryptType='assymetric'):
-        if(encryptType == 'assymetric'):
+    def encryptMessage(self, message, key, encryptType='asymmetric'):
+        if(encryptType == 'asymmetric'):
             encryptor = PKCS1_OAEP.new(key)
             return encryptor.encrypt(message)
         else:
@@ -55,8 +55,8 @@ class Socket:
             iv = b64encode(encryptor.iv).decode('utf-8')
             return {'cipher': cipher, 'iv': iv}
 
-    def decryptMessage(self, message, key, encryptType='assymetric', iv=''):
-        if(encryptType == 'assymetric'):
+    def decryptMessage(self, message, key, encryptType='asymmetric', iv=''):
+        if(encryptType == 'asymmetric'):
             decryptor = PKCS1_OAEP.new(key)
             return decryptor.decrypt(ast.literal_eval(str(message)))
         else:
